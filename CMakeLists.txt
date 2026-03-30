@@ -39,8 +39,7 @@ if(NOT DPDK_FOUND)
         message(STATUS "Found DPDK at: ${DPDK_PATH}")
         message(STATUS "Include dirs: ${DPDK_INCLUDE_DIRS}")
     else()
-        message(WARNING "DPDK not found. Please set RTE_SDK/RTE_TARGET or install DPDK.")
-        message(WARNING "Falling back to raw socket mode (no DPDK)")
+        message(STATUS "DPDK not found. Using non-DPDK mode (raw socket).")
         option(USE_DPDK "Enable DPDK support" OFF)
     endif()
 endif()
@@ -78,8 +77,6 @@ set(CORE_SOURCES
 set(PROTOCOL_SOURCES
     src/protocol/ethernet.c
     src/protocol/ip.c
-    src/protocol/tcp.c
-    src/protocol/udp.c
     src/protocol/icmp.c
     src/protocol/dns.c
     src/protocol/tls.c
@@ -112,15 +109,6 @@ set(APP_SOURCES
 if(USE_DPDK)
     set(DPDK_SOURCES
         src/dpdk_adapter.c
-    )
-else()
-    # Use old raw socket implementation
-    set(OLD_SOURCES
-        src/main.c
-        src/packet_parser.c
-        src/flow_analyzer.c
-        src/stats_collector.c
-        src/display.c
     )
 endif()
 
@@ -156,7 +144,6 @@ if(USE_DPDK)
     )
 else()
     add_executable(traffic_analyzer
-        ${OLD_SOURCES}
         ${CORE_SOURCES}
         ${PROTOCOL_SOURCES}
         ${ANALYZER_SOURCES}
@@ -167,6 +154,7 @@ else()
 
     target_link_libraries(traffic_analyzer
         pthread
+        m
     )
 endif()
 
@@ -203,24 +191,11 @@ add_custom_target(info
 )
 
 add_custom_target(run
-    COMMAND ${CMAKE_COMMAND} -E echo "Run with: sudo ./traffic_analyzer -c 0x3 -n 4 -- --port 0000:00:01.0"
+    COMMAND ${CMAKE_COMMAND} -E echo "Run with: sudo ./traffic_analyzer -i eth0"
     DEPENDS traffic_analyzer
-)
-
-add_custom_target(test
-    COMMAND ${CMAKE_COMMAND} -E echo "Running traffic analyzer in background..."
-    COMMAND ${CMAKE_COMMAND} -E echo "Generating test traffic..."
-    DEPENDS traffic_analyzer
-)
-
-add_custom_target(clean-huge
-    COMMAND ${CMAKE_COMMAND} -E echo "Cleaning DPDK hugepages..."
-    COMMAND ${CMAKE_COMMAND} -E echo "Run: sudo rm -rf /mnt/huge/*"
 )
 
 add_custom_target(setup-huge
     COMMAND ${CMAKE_COMMAND} -E echo "Setting up DPDK hugepages..."
-    COMMAND ${CMAKE_COMMAND} -E echo "Run: sudo mkdir -p /mnt/huge"
-    COMMAND ${CMAKE_COMMAND} -E echo "Run: sudo mount -t hugetlbfs nodev /mnt/huge 2>/dev/null || true"
     COMMAND ${CMAKE_COMMAND} -E echo "Run: echo 2048 | sudo tee /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages"
 )

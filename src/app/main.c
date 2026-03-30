@@ -1,10 +1,16 @@
+/* Feature test macros - must be before any includes */
+#ifndef USE_DPDK
+    #define _DEFAULT_SOURCE
+    #define _BSD_SOURCE
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
 #include <time.h>
-#include <sys/ioctl.h>
+#include <errno.h>
 
 #ifdef USE_DPDK
     #include <rte_eal.h>
@@ -17,8 +23,17 @@
     #define DPDK_MODE 1
 #else
     #define DPDK_MODE 0
-    /* Non-DPDK mode - simplified for build verification */
-    /* Raw socket functionality requires additional setup */
+    /* Non-DPDK mode - raw socket functionality */
+    #include <sys/types.h>
+    #include <sys/socket.h>
+    #include <sys/select.h>
+    #include <sys/ioctl.h>
+    #include <net/if.h>
+    #include <netinet/in.h>
+    #include <netinet/ether.h>
+    #include <arpa/inet.h>
+    #include <linux/if_ether.h>
+    #include <linux/if_packet.h>
 #endif
 
 #include "packet_parser.h"
@@ -92,21 +107,123 @@ static int packet_processor(void *arg)
     return 0;
 }
 #else
-/* Raw socket receive function (non-DPDK mode - simplified) */
+/* Raw socket receive function (non-DPDK mode) */
 static int raw_socket_receive(const char *interface, struct stats_collector *collector)
 {
-    (void)interface;
-    (void)collector;
+    int sock_fd;
+    struct sockaddr_ll sll;
+    struct ifreq ifr;
+    uint8_t buffer[65536];
+    struct packet_info info;
+    time_t last_display = time(NULL);
 
-    printf("Non-DPDK mode: Raw socket capture not fully implemented in build verification\n");
-    printf("Please use DPDK mode or implement raw socket functionality\n");
-    printf("Interface: %s\n", interface);
-
-    /* Simple sleep loop to keep program running */
-    while (g_running) {
-        sleep(1);
+    /* Create raw socket */
+    sock_fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
+    if (sock_fd < 0) {
+        perror("socket");
+        return -1;
     }
 
+    /* Get interface index */
+    memset(&ifr, 0, sizeof(ifr));
+    strncpy(ifr.ifr_name, interface, IFNAMSIZ - 1);
+    if (ioctl(sock_fd, SIOCGIFINDEX, &ifr) < 0) {
+        perror("ioctl SIOCGIFINDEX");
+        close(sock_fd);
+        return -1;
+    }
+
+    /* Set promiscuous mode */
+    if (ioctl(sock_fd, SIOCGIFFLAGS, &ifr) < 0) {
+        perror("ioctl SIOCGIFFLAGS");
+        close(sock_fd);
+        return -1;
+    }
+    ifr.ifr_flags |= IFF_PROMISC;
+    if (ioctl(sock_fd, SIOCSIFFLAGS, &ifr) < 0) {
+        perror("ioctl SIOCSIFFLAGS");
+        close(sock_fd);
+        return -1;
+    }
+
+    /* Bind to interface */
+    memset(&sll, 0, sizeof(sll));
+    sll.sll_family = AF_PACKET;
+    sll.sll_ifindex = ifr.ifr_ifindex;
+    sll.sll_protocol = htons(ETH_P_ALL);
+    if (bind(sock_fd, (struct sockaddr *)&sll, sizeof(sll)) < 0) {
+        perror("bind");
+        close(sock_fd);
+        return -1;
+    }
+
+    printf("Listening on interface %s (non-DPDK mode)...\n", interface);
+    printf("Press Ctrl+C to stop\n\n");
+
+    /* Set socket to non-blocking mode for periodic display updates */
+    /* Use select with timeout for display updates */
+
+    while (g_running) {
+        struct timeval timeout;
+        fd_set readfds;
+        ssize_t len;
+        int ret;
+
+        FD_ZERO(&readfds);
+        FD_SET(sock_fd, &readfds);
+
+        /* Wait up to 100ms for packets */
+        timeout.tv_sec = 0;
+        timeout.tv_usec = 100000;
+
+        ret = select(sock_fd + 1, &readfds, NULL, NULL, &timeout);
+
+        if (ret < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            perror("select");
+            break;
+        }
+
+        if (ret > 0 && FD_ISSET(sock_fd, &readfds)) {
+            len = recvfrom(sock_fd, buffer, sizeof(buffer), 0, NULL, NULL);
+            if (len > 0) {
+                if (packet_parse_buffer(buffer, len, &info) == 0 && info.valid) {
+                    stats_collector_process(collector, &info, info.total_len);
+                }
+            }
+        }
+
+        /* Update display every second */
+        time_t now = time(NULL);
+        if (now - last_display >= 1) {
+            stats_collector_snapshot(collector);
+
+            const struct stats_snapshot *snapshot = stats_collector_get_snapshot(collector);
+            if (snapshot && g_renderer) {
+                renderer_render_all(g_renderer,
+                                    &snapshot->stats,
+                                    snapshot->bandwidth,
+                                    (struct flow_entry **)snapshot->top_flows,
+                                    (struct ip_entry **)snapshot->top_src_ips,
+                                    (struct ip_entry **)snapshot->top_dst_ips,
+                                    (struct fingerprint_entry **)snapshot->top_fingerprints);
+            }
+
+            last_display = now;
+        }
+    }
+
+    /* Disable promiscuous mode */
+    if (ioctl(sock_fd, SIOCGIFFLAGS, &ifr) < 0) {
+        perror("ioctl SIOCGIFFLAGS (cleanup)");
+    } else {
+        ifr.ifr_flags &= ~IFF_PROMISC;
+        ioctl(sock_fd, SIOCSIFFLAGS, &ifr);
+    }
+
+    close(sock_fd);
     return 0;
 }
 #endif

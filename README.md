@@ -27,66 +27,89 @@
 
 ## 构建与运行
 
+### 前置要求
+
+```bash
+# 安装构建工具
+sudo apt-get install -y cmake build-essential
+
+# （可选）安装DPDK（用于DPDK模式）
+sudo apt-get install -y dpdk dpdk-dev
+```
+
 ### 快速开始
 
 ```bash
 # 克隆项目
 cd dpdkDemo
 
-# 构建（非DPDK模式，无需DPDK依赖）
-make nodpdk
+# 构建项目
+mkdir build && cd build
+cmake ..
+make
 
 # 运行（非DPDK模式）
-sudo ./build/traffic_analyzer -i eth0
+sudo ./traffic_analyzer -i eth0
 ```
 
 ### DPDK模式构建
 
 ```bash
-# 安装DPDK依赖
-sudo apt-get install -y dpdk dpdk-dev
-
 # 配置Hugepages
 echo 2048 | sudo tee /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
 
-# 构建DPDK模式
-make dpdk
+# 构建DPDK模式（如果检测到DPDK）
+mkdir build && cd build
+cmake ..
+make
 
 # 绑定网卡到DPDK驱动
 sudo dpdk-devbind.py -b vfio-pci 0000:00:01.0
 
 # 运行DPDK模式
-sudo ./build/traffic_analyzer -c 0x3 -n 4 -- --port 0000:00:01.0
+sudo ./traffic_analyzer -c 0x3 -n 4 -- --port 0000:00:01.0
 ```
 
 ### 构建选项
 
 ```bash
-make              # 自动检测并构建
-make info         # 显示构建信息
-make dpdk         # 强制使用DPDK模式
-make nodpdk       # 强制使用非DPDK模式
-make clean        # 清理构建产物
-make clean-all    # 清理所有构建目录
+mkdir build && cd build
+
+# 默认构建（自动检测DPDK）
+cmake ..
+
+# 强制非DPDK模式
+cmake -DUSE_DPDK=OFF ..
+
+# 构建项目
+make
+
+# 查看构建信息
+make info
+
+# 清理
+make clean
+cd ..
+rm -rf build
 ```
 
 ### 运行参数
 
 #### 非DPDK模式（Raw Socket）
 ```
-./build/traffic_analyzer -i <interface>
+./traffic_analyzer -i <interface>
 
 参数:
   -i INTERFACE     网络接口（默认: eth0）
   --help          显示帮助信息
 
 示例:
-  ./build/traffic_analyzer -i eth0
+  ./traffic_analyzer -i eth0
 ```
 
 #### DPDK模式
 ```
-./build/traffic_analyzer [EAL options] -- [APP options]
+./traffic_analyzer [EAL options] -- [APP options]
 
 EAL选项:
   -c COREMASK      CPU核心掩码（十六进制）
@@ -99,8 +122,8 @@ EAL选项:
   --ring-size N    RX/TX环形缓冲区大小（默认: 512）
 
 示例:
-  ./build/traffic_analyzer -c 0x3 -n 4 -- --port 0000:00:01.0
-  ./build/traffic_analyzer -c 0xF -n 4 --file-prefix dpdk_demo -- --queues 2
+  ./traffic_analyzer -c 0x3 -n 4 -- --port 0000:00:01.0
+  ./traffic_analyzer -c 0xF -n 4 --file-prefix dpdk_demo -- --queues 2
 ```
 
 ## 模块化架构
@@ -285,17 +308,20 @@ Options:
 ```bash
 # 检查编译器版本
 gcc --version
+cmake --version
 
 # 清理后重新构建
-make clean-all
-make nodpdk
+rm -rf build
+mkdir build && cd build
+cmake -DUSE_DPDK=OFF ..
+make
 ```
 
 ### 权限错误
 
 ```bash
 # 需要 root权限访问网络接口
-sudo ./build/traffic_analyzer -i eth0
+sudo ./traffic_analyzer -i eth0
 ```
 
 ### DPDK模式初始化失败
