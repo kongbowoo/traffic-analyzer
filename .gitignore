@@ -77,4 +77,4 @@ desktop.ini
 
 # Test outputs
 test_output/
-*.pcap
+*.pcapdpdk/
