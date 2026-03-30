@@ -19,15 +19,15 @@ static void console_init(struct renderer *r)
         return;
     }
 
-    printf("\033[2J");  /* Clear screen */
-    printf("\033[H");   /* Move cursor to home */
+    /* Don't clear screen, just print header */
+    printf("DPDK Traffic Analyzer\n");
 }
 
 /* Begin rendering frame */
 static void console_begin(struct renderer *r)
 {
     (void)r;
-    printf("\033[H");   /* Move cursor to home */
+    /* Don't reposition cursor - just start output */
 }
 
 /* Render statistics */
@@ -57,10 +57,15 @@ static void console_render_stats(struct renderer *r, const struct traffic_stats 
     /* Application protocols */
     if (stats->http_packets > 0 || stats->https_packets > 0 ||
         stats->dns_packets > 0 || stats->icmp_bytes > 0) {
+        char http_buf[32], https_buf[32], dns_buf[32];
+        format_bytes(stats->http_bytes, http_buf, sizeof(http_buf));
+        format_bytes(stats->https_bytes, https_buf, sizeof(https_buf));
+        format_bytes(stats->dns_bytes, dns_buf, sizeof(dns_buf));
+
         printf("HTTP:%lu(%s)  HTTPS:%lu(%s)  DNS:%lu(%s)\n\n",
-               stats->http_packets, cr->bytes_buf,
-               stats->https_packets, cr->bytes_buf,
-               stats->dns_packets, cr->bytes_buf);
+               stats->http_packets, http_buf,
+               stats->https_packets, https_buf,
+               stats->dns_packets, dns_buf);
     }
 }
 
