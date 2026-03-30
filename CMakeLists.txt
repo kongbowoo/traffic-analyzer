@@ -153,6 +153,7 @@ else()
     )
 
     target_link_libraries(traffic_analyzer
+        pcap
         pthread
         m
     )

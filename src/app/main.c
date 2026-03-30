@@ -23,17 +23,8 @@
     #define DPDK_MODE 1
 #else
     #define DPDK_MODE 0
-    /* Non-DPDK mode - raw socket functionality */
-    #include <sys/types.h>
-    #include <sys/socket.h>
-    #include <sys/select.h>
-    #include <sys/ioctl.h>
-    #include <net/if.h>
-    #include <netinet/in.h>
-    #include <netinet/ether.h>
-    #include <arpa/inet.h>
-    #include <linux/if_ether.h>
-    #include <linux/if_packet.h>
+    /* Non-DPDK mode - use libpcap for packet capture */
+    #include <pcap.h>
 #endif
 
 #include "packet_parser.h"
@@ -107,92 +98,61 @@ static int packet_processor(void *arg)
     return 0;
 }
 #else
-/* Raw socket receive function (non-DPDK mode) */
+/* Packet capture using libpcap (non-DPDK mode) */
 static int raw_socket_receive(const char *interface, struct stats_collector *collector)
 {
-    int sock_fd;
-    struct sockaddr_ll sll;
-    struct ifreq ifr;
-    uint8_t buffer[65536];
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle;
+    struct pcap_pkthdr *header;
+    const u_char *packet;
     struct packet_info info;
     time_t last_display = time(NULL);
+    int ret;
 
-    /* Create raw socket */
-    sock_fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
-    if (sock_fd < 0) {
-        perror("socket");
+    /* Open the device for packet capture */
+    handle = pcap_open_live(interface, 65536, 1, 1000, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "Could not open device %s: %s\n", interface, errbuf);
         return -1;
     }
 
-    /* Get interface index */
-    memset(&ifr, 0, sizeof(ifr));
-    strncpy(ifr.ifr_name, interface, IFNAMSIZ - 1);
-    if (ioctl(sock_fd, SIOCGIFINDEX, &ifr) < 0) {
-        perror("ioctl SIOCGIFINDEX");
-        close(sock_fd);
-        return -1;
-    }
-
-    /* Set promiscuous mode */
-    if (ioctl(sock_fd, SIOCGIFFLAGS, &ifr) < 0) {
-        perror("ioctl SIOCGIFFLAGS");
-        close(sock_fd);
-        return -1;
-    }
-    ifr.ifr_flags |= IFF_PROMISC;
-    if (ioctl(sock_fd, SIOCSIFFLAGS, &ifr) < 0) {
-        perror("ioctl SIOCSIFFLAGS");
-        close(sock_fd);
-        return -1;
-    }
-
-    /* Bind to interface */
-    memset(&sll, 0, sizeof(sll));
-    sll.sll_family = AF_PACKET;
-    sll.sll_ifindex = ifr.ifr_ifindex;
-    sll.sll_protocol = htons(ETH_P_ALL);
-    if (bind(sock_fd, (struct sockaddr *)&sll, sizeof(sll)) < 0) {
-        perror("bind");
-        close(sock_fd);
-        return -1;
-    }
-
-    printf("Listening on interface %s (non-DPDK mode)...\n", interface);
+    printf("Listening on interface %s (non-DPDK mode using libpcap)...\n", interface);
     printf("Press Ctrl+C to stop\n\n");
 
-    /* Set socket to non-blocking mode for periodic display updates */
-    /* Use select with timeout for display updates */
-
     while (g_running) {
-        struct timeval timeout;
-        fd_set readfds;
-        ssize_t len;
-        int ret;
+        /* Read a packet with timeout (1000ms) */
+        ret = pcap_next_ex(handle, &header, &packet);
 
-        FD_ZERO(&readfds);
-        FD_SET(sock_fd, &readfds);
+        if (ret == 0) {
+            /* Timeout - check if we need to update display */
+            time_t now = time(NULL);
+            if (now - last_display >= 1) {
+                stats_collector_snapshot(collector);
 
-        /* Wait up to 100ms for packets */
-        timeout.tv_sec = 0;
-        timeout.tv_usec = 100000;
+                const struct stats_snapshot *snapshot = stats_collector_get_snapshot(collector);
+                if (snapshot && g_renderer) {
+                    renderer_render_all(g_renderer,
+                                        &snapshot->stats,
+                                        snapshot->bandwidth,
+                                        (struct flow_entry **)snapshot->top_flows,
+                                        (struct ip_entry **)snapshot->top_src_ips,
+                                        (struct ip_entry **)snapshot->top_dst_ips,
+                                        (struct fingerprint_entry **)snapshot->top_fingerprints);
+                }
 
-        ret = select(sock_fd + 1, &readfds, NULL, NULL, &timeout);
+                last_display = now;
+            }
+            continue;
+        }
 
         if (ret < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            perror("select");
+            fprintf(stderr, "Error reading packet: %s\n", pcap_geterr(handle));
             break;
         }
 
-        if (ret > 0 && FD_ISSET(sock_fd, &readfds)) {
-            len = recvfrom(sock_fd, buffer, sizeof(buffer), 0, NULL, NULL);
-            if (len > 0) {
-                if (packet_parse_buffer(buffer, len, &info) == 0 && info.valid) {
-                    stats_collector_process(collector, &info, info.total_len);
-                }
-            }
+        /* Parse the packet */
+        if (packet_parse_buffer(packet, header->caplen, &info) == 0 && info.valid) {
+            stats_collector_process(collector, &info, info.total_len);
         }
 
         /* Update display every second */
@@ -215,15 +175,8 @@ static int raw_socket_receive(const char *interface, struct stats_collector *col
         }
     }
 
-    /* Disable promiscuous mode */
-    if (ioctl(sock_fd, SIOCGIFFLAGS, &ifr) < 0) {
-        perror("ioctl SIOCGIFFLAGS (cleanup)");
-    } else {
-        ifr.ifr_flags &= ~IFF_PROMISC;
-        ioctl(sock_fd, SIOCSIFFLAGS, &ifr);
-    }
-
-    close(sock_fd);
+    /* Close the capture handle */
+    pcap_close(handle);
     return 0;
 }
 #endif

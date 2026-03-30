@@ -31,7 +31,7 @@
 
 ```bash
 # 安装构建工具
-sudo apt-get install -y cmake build-essential
+sudo apt-get install -y cmake build-essential libpcap-dev
 
 # （可选）安装DPDK（用于DPDK模式）
 sudo apt-get install -y dpdk dpdk-dev
@@ -46,9 +46,9 @@ cd dpdkDemo
 # 构建项目
 mkdir build && cd build
 cmake ..
-make
+cmake --build .
 
-# 运行（非DPDK模式）
+# 运行（非DPDK模式，需要root权限）
 sudo ./traffic_analyzer -i eth0
 ```
 
@@ -61,7 +61,7 @@ echo 2048 | sudo tee /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
 # 构建DPDK模式（如果检测到DPDK）
 mkdir build && cd build
 cmake ..
-make
+cmake --build .
 
 # 绑定网卡到DPDK驱动
 sudo dpdk-devbind.py -b vfio-pci 0000:00:01.0
@@ -82,13 +82,13 @@ cmake ..
 cmake -DUSE_DPDK=OFF ..
 
 # 构建项目
-make
+cmake --build .
 
 # 查看构建信息
-make info
+cmake --build . --target info
 
 # 清理
-make clean
+cmake --build . --target clean
 cd ..
 rm -rf build
 ```
@@ -138,8 +138,6 @@ dpdkDemo/
 │   ├── protocol/          # 协议解析模块
 │   │   ├── ethernet.h     # 以太网（DPDK/非DPDK兼容）
 │   │   ├── ip.h           # IPv4（DPDK/非DPDK兼容）
-│   │   ├── tcp.h          # TCP（DPDK/非DPDK兼容）
-│   │   ├── udp.h          # UDP（DPDK/非DPDK兼容）
 │   │   ├── icmp.h         # ICMP协议
 │   │   ├── dns.h          # DNS协议解析
 │   │   └── tls.h          # TLS协议 + JA4指纹
@@ -314,7 +312,7 @@ cmake --version
 rm -rf build
 mkdir build && cd build
 cmake -DUSE_DPDK=OFF ..
-make
+cmake --build .
 ```
 
 ### 权限错误
@@ -322,6 +320,16 @@ make
 ```bash
 # 需要 root权限访问网络接口
 sudo ./traffic_analyzer -i eth0
+```
+
+### libpcap相关错误
+
+```bash
+# 安装libpcap开发包
+sudo apt-get install -y libpcap-dev
+
+# 检查libpcap是否正确安装
+pkg-config --libs libpcap
 ```
 
 ### DPDK模式初始化失败
