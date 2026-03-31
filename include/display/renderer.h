@@ -7,6 +7,7 @@
 #include "../analyzer/flow_table.h"
 #include "../analyzer/ip_table.h"
 #include "../analyzer/fingerprint_table.h"
+#include "../analyzer/geolocation.h"
 
 /* Renderer interface */
 struct renderer {
@@ -26,10 +27,10 @@ struct renderer {
     void (*render_flows)(struct renderer *r, struct flow_entry **flows, int n);
 
     /* Render top source IPs */
-    void (*render_src_ips)(struct renderer *r, struct ip_entry **ips, int n);
+    void (*render_src_ips)(struct renderer *r, struct ip_entry **ips, int n, const struct geo_db *geo_db);
 
     /* Render top destination IPs */
-    void (*render_dst_ips)(struct renderer *r, struct ip_entry **ips, int n);
+    void (*render_dst_ips)(struct renderer *r, struct ip_entry **ips, int n, const struct geo_db *geo_db);
 
     /* Render top fingerprints */
     void (*render_fingerprints)(struct renderer *r, struct fingerprint_entry **fps, int n);
@@ -57,6 +58,7 @@ void renderer_render_all(struct renderer *r,
                         struct flow_entry **flows,
                         struct ip_entry **src_ips,
                         struct ip_entry **dst_ips,
-                        struct fingerprint_entry **fingerprints);
+                        struct fingerprint_entry **fingerprints,
+                        const struct geo_db *geo_db);
 
 #endif /* RENDERER_H */

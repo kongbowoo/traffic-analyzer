@@ -10,6 +10,8 @@ struct console_renderer {
     char ip_buf[16];
     char bytes_buf[32];
     char bandwidth_buf[32];
+    char country_buf[8];  /* For country code */
+    char pkts_buf[32];    /* For packet count with units */
 };
 
 /* Initialize console renderer */
@@ -42,7 +44,7 @@ static void console_render_stats(struct renderer *r, const struct traffic_stats 
     format_bytes(stats->total_bytes, cr->bytes_buf, sizeof(cr->bytes_buf));
     format_bandwidth(bandwidth, cr->bandwidth_buf, sizeof(cr->bandwidth_buf));
 
-    printf("Packets: %lu  Bytes: %s  Bandwidth: %s\n\n",
+    printf("Packets: %lu pkts  Bytes: %s  Bandwidth: %s\n\n",
            stats->total_packets, cr->bytes_buf, cr->bandwidth_buf);
 
     /* Protocol distribution */
@@ -62,10 +64,22 @@ static void console_render_stats(struct renderer *r, const struct traffic_stats 
         format_bytes(stats->https_bytes, https_buf, sizeof(https_buf));
         format_bytes(stats->dns_bytes, dns_buf, sizeof(dns_buf));
 
-        printf("HTTP:%lu(%s)  HTTPS:%lu(%s)  DNS:%lu(%s)\n\n",
+        printf("HTTP:%lu pkts(%s)  HTTPS:%lu pkts(%s)  DNS:%lu pkts(%s)\n\n",
                stats->http_packets, http_buf,
                stats->https_packets, https_buf,
                stats->dns_packets, dns_buf);
+    }
+
+    /* TLS handshake statistics */
+    if (stats->tls_client_hello > 0 || stats->tls_server_hello > 0) {
+        printf("TLS Handshake: ClientHello:%lu  ServerHello:%lu\n",
+               stats->tls_client_hello, stats->tls_server_hello);
+        if (stats->tls_v1_0 > 0 || stats->tls_v1_1 > 0 ||
+            stats->tls_v1_2 > 0 || stats->tls_v1_3 > 0) {
+            printf("TLS Versions: 1.0:%lu  1.1:%lu  1.2:%lu  1.3:%lu\n",
+                   stats->tls_v1_0, stats->tls_v1_1, stats->tls_v1_2, stats->tls_v1_3);
+        }
+        printf("\n");
     }
 }
 
@@ -83,13 +97,13 @@ static void console_render_flows(struct renderer *r, struct flow_entry **flows, 
         printf("%s:%u ", cr->ip_buf, flows[i]->key.dst_port);
 
         format_bytes(flows[i]->byte_count, cr->bytes_buf, sizeof(cr->bytes_buf));
-        printf("%lu %s\n", flows[i]->packet_count, cr->bytes_buf);
+        printf("%lu pkts %s\n", flows[i]->packet_count, cr->bytes_buf);
     }
     printf("\n");
 }
 
 /* Render top source IPs */
-static void console_render_src_ips(struct renderer *r, struct ip_entry **ips, int n)
+static void console_render_src_ips(struct renderer *r, struct ip_entry **ips, int n, const struct geo_db *geo_db)
 {
     struct console_renderer *cr = (struct console_renderer *)r->private_data;
 
@@ -97,13 +111,20 @@ static void console_render_src_ips(struct renderer *r, struct ip_entry **ips, in
     for (int i = 0; i < n && ips[i]; i++) {
         format_ip(ips[i]->ip, cr->ip_buf, sizeof(cr->ip_buf));
         format_bytes(ips[i]->byte_count, cr->bytes_buf, sizeof(cr->bytes_buf));
-        printf("%d. %s  %lu %s\n", i + 1, cr->ip_buf, ips[i]->packet_count, cr->bytes_buf);
+
+        /* Get country code if geo_db is available */
+        const char *country = geo_db ? geo_lookup_country(geo_db, ips[i]->ip) : NULL;
+        if (country && country[0] != '\0') {
+            printf("%d. %s [%s]  %lu pkts %s\n", i + 1, cr->ip_buf, country, ips[i]->packet_count, cr->bytes_buf);
+        } else {
+            printf("%d. %s  %lu pkts %s\n", i + 1, cr->ip_buf, ips[i]->packet_count, cr->bytes_buf);
+        }
     }
     printf("\n");
 }
 
 /* Render top destination IPs */
-static void console_render_dst_ips(struct renderer *r, struct ip_entry **ips, int n)
+static void console_render_dst_ips(struct renderer *r, struct ip_entry **ips, int n, const struct geo_db *geo_db)
 {
     struct console_renderer *cr = (struct console_renderer *)r->private_data;
 
@@ -111,7 +132,14 @@ static void console_render_dst_ips(struct renderer *r, struct ip_entry **ips, in
     for (int i = 0; i < n && ips[i]; i++) {
         format_ip(ips[i]->ip, cr->ip_buf, sizeof(cr->ip_buf));
         format_bytes(ips[i]->byte_count, cr->bytes_buf, sizeof(cr->bytes_buf));
-        printf("%d. %s  %lu %s\n", i + 1, cr->ip_buf, ips[i]->packet_count, cr->bytes_buf);
+
+        /* Get country code if geo_db is available */
+        const char *country = geo_db ? geo_lookup_country(geo_db, ips[i]->ip) : NULL;
+        if (country && country[0] != '\0') {
+            printf("%d. %s [%s]  %lu pkts %s\n", i + 1, cr->ip_buf, country, ips[i]->packet_count, cr->bytes_buf);
+        } else {
+            printf("%d. %s  %lu pkts %s\n", i + 1, cr->ip_buf, ips[i]->packet_count, cr->bytes_buf);
+        }
     }
     printf("\n");
 }
@@ -119,9 +147,10 @@ static void console_render_dst_ips(struct renderer *r, struct ip_entry **ips, in
 /* Render top fingerprints */
 static void console_render_fingerprints(struct renderer *r, struct fingerprint_entry **fps, int n)
 {
+    (void)r;
     printf("Top %d JA4:\n", n);
     for (int i = 0; i < n && fps[i]; i++) {
-        printf("%d. %s  %lu\n", i + 1, fps[i]->fingerprint, fps[i]->packet_count);
+        printf("%d. %s  %lu pkts\n", i + 1, fps[i]->fingerprint, fps[i]->packet_count);
     }
     printf("\n");
 }
@@ -193,7 +222,8 @@ void renderer_render_all(struct renderer *r,
                         struct flow_entry **flows,
                         struct ip_entry **src_ips,
                         struct ip_entry **dst_ips,
-                        struct fingerprint_entry **fingerprints)
+                        struct fingerprint_entry **fingerprints,
+                        const struct geo_db *geo_db)
 {
     if (!r) {
         return;
@@ -212,11 +242,11 @@ void renderer_render_all(struct renderer *r,
     }
 
     if (r->render_src_ips && src_ips) {
-        r->render_src_ips(r, src_ips, 5);
+        r->render_src_ips(r, src_ips, 5, geo_db);
     }
 
     if (r->render_dst_ips && dst_ips) {
-        r->render_dst_ips(r, dst_ips, 5);
+        r->render_dst_ips(r, dst_ips, 5, geo_db);
     }
 
     if (r->render_fingerprints && fingerprints) {

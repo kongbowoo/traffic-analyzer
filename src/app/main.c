@@ -30,6 +30,7 @@
 #include "packet_parser.h"
 #include "stats_collector.h"
 #include "display/renderer.h"
+#include "../analyzer/geolocation.h"
 
 /* Global state */
 static volatile int g_running = 1;
@@ -75,6 +76,7 @@ static int packet_processor(void *arg)
             stats_collector_snapshot(g_collector);
 
             const struct stats_snapshot *snapshot = stats_collector_get_snapshot(g_collector);
+            const struct geo_db *geo_db = stats_collector_get_geo_db(g_collector);
             if (snapshot && g_renderer) {
                 renderer_render_all(g_renderer,
                                     &snapshot->stats,
@@ -82,7 +84,8 @@ static int packet_processor(void *arg)
                                     (struct flow_entry **)snapshot->top_flows,
                                     (struct ip_entry **)snapshot->top_src_ips,
                                     (struct ip_entry **)snapshot->top_dst_ips,
-                                    (struct fingerprint_entry **)snapshot->top_fingerprints);
+                                    (struct fingerprint_entry **)snapshot->top_fingerprints,
+                                    geo_db);
             }
 
             last_display = now;
@@ -130,6 +133,7 @@ static int raw_socket_receive(const char *interface, struct stats_collector *col
                 stats_collector_snapshot(collector);
 
                 const struct stats_snapshot *snapshot = stats_collector_get_snapshot(collector);
+                const struct geo_db *geo_db = stats_collector_get_geo_db(collector);
                 if (snapshot && g_renderer) {
                     renderer_render_all(g_renderer,
                                         &snapshot->stats,
@@ -137,7 +141,8 @@ static int raw_socket_receive(const char *interface, struct stats_collector *col
                                         (struct flow_entry **)snapshot->top_flows,
                                         (struct ip_entry **)snapshot->top_src_ips,
                                         (struct ip_entry **)snapshot->top_dst_ips,
-                                        (struct fingerprint_entry **)snapshot->top_fingerprints);
+                                        (struct fingerprint_entry **)snapshot->top_fingerprints,
+                                        geo_db);
                 }
 
                 last_display = now;
@@ -161,6 +166,7 @@ static int raw_socket_receive(const char *interface, struct stats_collector *col
             stats_collector_snapshot(collector);
 
             const struct stats_snapshot *snapshot = stats_collector_get_snapshot(collector);
+            const struct geo_db *geo_db = stats_collector_get_geo_db(collector);
             if (snapshot && g_renderer) {
                 renderer_render_all(g_renderer,
                                     &snapshot->stats,
@@ -168,7 +174,8 @@ static int raw_socket_receive(const char *interface, struct stats_collector *col
                                     (struct flow_entry **)snapshot->top_flows,
                                     (struct ip_entry **)snapshot->top_src_ips,
                                     (struct ip_entry **)snapshot->top_dst_ips,
-                                    (struct fingerprint_entry **)snapshot->top_fingerprints);
+                                    (struct fingerprint_entry **)snapshot->top_fingerprints,
+                                    geo_db);
             }
 
             last_display = now;
